@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>Search Emails</h1>
+
+<div class="row mt-4">
+    <div class="col-12">
+        <form onsubmit="searchEmails(event)">
+            <div class="input-group mb-3">
+                <input type="text" class="form-control" id="search-query" placeholder="Search emails...">
+                <button class="btn btn-primary" type="submit">Search</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-12">
+        <div id="search-results"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function searchEmails(event) {
+    event.preventDefault();
+    
+    const query = document.getElementById('search-query').value;
+    if (!query) return;
+    
+    const response = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+    const results = await response.json();
+    
+    const resultsDiv = document.getElementById('search-results');
+    
+    if (results.length === 0) {
+        resultsDiv.innerHTML = '<p>No results found.</p>';
+        return;
+    }
+    
+    resultsDiv.innerHTML = results.map(email => `
+        <div class="card mb-3">
+            <div class="card-body">
+                <h5 class="card-title">${email.subject}</h5>
+                <p class="card-text">
+                    <strong>From:</strong> ${email.from_name} (${email.from_email})<br>
+                    <strong>Date:</strong> ${new Date(email.date).toLocaleString()}<br>
+                    <strong>Internal:</strong> ${email.is_internal ? 'Yes' : 'No'}
+                </p>
+                <p class="card-text">${email.body.substring(0, 200)}...</p>
+                ${email.attachments && email.attachments.length > 0 ? `
+                    <p><strong>Attachments:</strong> ${email.attachments.length}</p>
+                ` : ''}
+            </div>
+        </div>
+    `).join('');
+}
+</script>
+{% endblock %}

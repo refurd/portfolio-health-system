@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>Thread Timeline</h1>
+
+<div class="row mt-4">
+    <div class="col-12">
+        <div id="thread-info" class="mb-4"></div>
+        
+        <h3>Daily Response Timeline</h3>
+        <div id="timeline-chart" class="mb-4"></div>
+        
+        <h3>Unanswered Questions</h3>
+        <div id="unanswered-questions" class="mb-4"></div>
+        
+        <h3>Related Threads</h3>
+        <div id="related-threads"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+const threadId = '{{ thread_id }}';
+
+async function loadThreadDetails() {
+    // Load timeline
+    const timelineResponse = await fetch(`/api/thread-timeline/${threadId}`);
+    const timeline = await timelineResponse.json();
+    
+    // Display thread info
+    const infoDiv = document.getElementById('thread-info');
+    infoDiv.innerHTML = `
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">${timeline.thread_subject}</h5>
+                <div class="row">
+                    <div class="col-md-3">
+                        <strong>Total Days:</strong> ${timeline.total_days}
+                    </div>
+                    <div class="col-md-3">
+                        <strong>Days with Unanswered:</strong> ${timeline.days_with_unanswered}
+                    </div>
+                    <div class="col-md-3">
+                        <strong>Avg Response Rate:</strong> ${(timeline.average_daily_response_rate * 100).toFixed(0)}%
+                    </div>
+                    <div class="col-md-3">
+                        <strong>Currently Waiting:</strong> ${timeline.waiting_for_response?.length || 0} people
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Create timeline chart
+    if (timeline.timeline && timeline.timeline.length > 0) {
+        const ctx = document.createElement('canvas');
+        document.getElementById('timeline-chart').appendChild(ctx);
+        
+        new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: timeline.timeline.map(t => t.date),
+                datasets: [
+                    {
+                        label: 'Questions Asked',
+                        data: timeline.timeline.map(t => t.questions_asked),
+                        backgroundColor: 'rgba(54, 162, 235, 0.5)'
+                    },
+                    {
+                        label: 'Answered Same Day',
+                        data: timeline.timeline.map(t => t.answered_same_day),
+                        backgroundColor: 'rgba(75, 192, 192, 0.5)'
+                    },
+                    {
+                        label: 'Unanswered',
+                        data: timeline.timeline.map(t => t.unanswered_same_day),
+                        backgroundColor: 'rgba(255, 99, 132, 0.5)'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+    }
+    
+    // Display unanswered questions
+    const unansweredDiv = document.getElementById('unanswered-questions');
+    if (timeline.unanswered_today && timeline.unanswered_today.length > 0) {
+        unansweredDiv.innerHTML = timeline.unanswered_today.map(q => `
+            <div class="alert ${q.critical ? 'alert-danger' : 'alert-warning'}">
+                <strong>${q.question}</strong><br>
+                Asked by: ${q.asked_by} on ${q.asked_on}<br>
+                Waiting for ${q.days_waiting} days
+            </div>
+        `).join('');
+    } else {
+        unansweredDiv.innerHTML = '<p class="text-muted">No unanswered questions</p>';
+    }
+    
+    // Load related threads
+    const connectionsResponse = await fetch(`/api/thread-connections/${threadId}`);
+    const connections = await connectionsResponse.json();
+    
+    const relatedDiv = document.getElementById('related-threads');
+    if (connections.length > 0) {
+        relatedDiv.innerHTML = connections.map(conn => `
+            <div class="card mb-2">
+                <div class="card-body">
+                    <h6 class="card-title">
+                        <a href="/thread/${conn.thread_id}">${conn.subject}</a>
+                        ${conn.is_continuation ? '<span class="badge bg-info ms-2">Continuation</span>' : ''}
+                    </h6>
+                    <small class="text-muted">
+                        Common participants: ${conn.common_participants.join(', ')}<br>
+                        Status: ${conn.status} | Last activity: ${new Date(conn.last_activity).toLocaleDateString()}
+                    </small>
+                </div>
+            </div>
+        `).join('');
+    } else {
+        relatedDiv.innerHTML = '<p class="text-muted">No related threads found</p>';
+    }
+}
+
+loadThreadDetails();
+</script>
+{% endblock %}

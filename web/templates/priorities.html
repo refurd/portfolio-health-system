@@ -1,0 +1,219 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>Priority Issues</h1>
+
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="mb-3">
+            <button class="btn btn-warning" onclick="showTodaysUnanswered()">
+                <i class="bi bi-exclamation-triangle"></i> Today's Unanswered Questions
+            </button>
+        </div>
+        
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>Subject</th>
+                    <th>Score</th>
+                    <th>Days Stalled</th>
+                    <th>Participants</th>
+                    <th>Response Status</th>
+                    <th>Attachments</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="priorities-table">
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="modal fade" id="detailsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Priority Details</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="modal-body">
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="todaysModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Today's Unanswered Questions</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="todays-modal-body">
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let prioritiesData = [];
+
+async function loadPriorities() {
+    const response = await fetch('/api/priorities');
+    prioritiesData = await response.json();
+    
+    const tbody = document.getElementById('priorities-table');
+    tbody.innerHTML = prioritiesData.map((p, idx) => {
+        // Calculate response status
+        const metadata = p.thread?.metadata || {};
+        const unansweredToday = metadata.unanswered_today || [];
+        const hasUrgentUnanswered = unansweredToday.some(q => q.critical);
+        
+        let responseStatus = '<span class="badge bg-success">OK</span>';
+        if (hasUrgentUnanswered) {
+            responseStatus = `<span class="badge bg-danger">${unansweredToday.length} Critical</span>`;
+        } else if (unansweredToday.length > 0) {
+            responseStatus = `<span class="badge bg-warning">${unansweredToday.length} Pending</span>`;
+        }
+        
+        return `
+        <tr>
+            <td>${p.thread?.subject || 'Unknown'}</td>
+            <td><span class="badge bg-${p.score > 0.8 ? 'danger' : p.score > 0.5 ? 'warning' : 'info'}">${p.score.toFixed(2)}</span></td>
+            <td>${p.days_stalled}</td>
+            <td>${p.participants?.length || 0} (${p.external_participants?.length || 0} external)</td>
+            <td>${responseStatus}</td>
+            <td>${p.attachments?.length || 0}</td>
+            <td>
+                <button class="btn btn-sm btn-primary" onclick="showDetails(${idx})">Details</button>
+                <a href="/thread/${p.thread_id}" class="btn btn-sm btn-info">Timeline</a>
+            </td>
+        </tr>
+    `}).join('');
+}
+
+function showDetails(idx) {
+    const priority = prioritiesData[idx];
+    const modalBody = document.getElementById('modal-body');
+    
+    const unansweredToday = priority.thread?.metadata?.unanswered_today || [];
+    
+    modalBody.innerHTML = `
+        <h6>Attention Flags</h6>
+        <div class="mb-3">
+            ${Object.entries(priority.attention_flags || {}).map(([flag, score]) => `
+                <div class="mb-2">
+                    <span>${flag}:</span>
+                    <div class="progress">
+                        <div class="progress-bar bg-${score > 0.7 ? 'danger' : score > 0.4 ? 'warning' : 'success'}" 
+                             style="width: ${score * 100}%">${(score * 100).toFixed(0)}%</div>
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+        
+        <h6>Issues</h6>
+        <ul>
+            ${(priority.issues || []).map(issue => `
+                <li><strong>${issue.type}:</strong> ${issue.description} (${issue.severity})</li>
+            `).join('')}
+        </ul>
+        
+        <h6>Recommendations</h6>
+        <ul>
+            ${(priority.recommendations || []).map(rec => `<li>${rec}</li>`).join('')}
+        </ul>
+        
+        ${unansweredToday.length > 0 ? `
+            <h6>Unanswered Questions (Still Pending)</h6>
+            <div class="list-group mb-3">
+                ${unansweredToday.map(q => `
+                    <div class="list-group-item ${q.critical ? 'list-group-item-danger' : 'list-group-item-warning'}">
+                        <strong>${q.question}</strong><br>
+                        <small>Asked by ${q.asked_by} on ${q.asked_on} (${q.days_waiting} days ago)</small>
+                    </div>
+                `).join('')}
+            </div>
+        ` : ''}
+        
+        ${priority.thread?.metadata?.daily_response_status ? `
+            <h6>Daily Response Status</h6>
+            <div class="timeline mb-3" style="max-height: 300px; overflow-y: auto;">
+                ${Object.entries(priority.thread.metadata.daily_response_status).map(([date, status]) => `
+                    <div class="timeline-item border-start ps-3 pb-2">
+                        <strong>${date}:</strong>
+                        <div class="ms-2">
+                            <span class="text-primary">${status.total_questions || 0} questions asked</span>,
+                            <span class="text-success">${status.answered_same_day || 0} answered same day</span>,
+                            <span class="text-warning">${status.unanswered_same_day || 0} unanswered</span>
+                            ${status.has_pending_response ? '<span class="badge bg-warning ms-2">Has Pending</span>' : ''}
+                            ${status.average_response_time_hours ? `
+                                <span class="text-muted ms-2">(avg ${status.average_response_time_hours.toFixed(1)}h response)</span>
+                            ` : ''}
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        ` : ''}
+        
+        ${priority.attachments && priority.attachments.length > 0 ? `
+            <h6>Attachments</h6>
+            <ul>
+                ${priority.attachments.map(att => `
+                    <li><a href="/download${att}" target="_blank">${att.split('/').pop()}</a></li>
+                `).join('')}
+            </ul>
+        ` : ''}
+    `;
+    
+    new bootstrap.Modal(document.getElementById('detailsModal')).show();
+}
+
+async function showTodaysUnanswered() {
+    const response = await fetch('/api/todays-pending');
+    const todaysPending = await response.json();
+    
+    const modalBody = document.getElementById('todays-modal-body');
+    
+    if (todaysPending.length === 0) {
+        modalBody.innerHTML = '<p>No unanswered questions from today!</p>';
+    } else {
+        modalBody.innerHTML = todaysPending.map(thread => `
+            <div class="card mb-3">
+                <div class="card-body">
+                    <h6 class="card-title">${thread.thread_subject}</h6>
+                    ${thread.questions ? `
+                        <strong>Questions asked today but not answered:</strong>
+                        <ul>
+                            ${thread.questions.map(q => `
+                                <li>
+                                    <strong>${q.question}</strong><br>
+                                    <small>Asked by ${q.asked_by} at ${q.asked_at}</small>
+                                </li>
+                            `).join('')}
+                        </ul>
+                    ` : ''}
+                    ${thread.critical_unanswered ? `
+                        <div class="alert alert-danger mt-2">
+                            <strong>Critical unanswered (${thread.oldest_unanswered_days} days old):</strong>
+                            <ul class="mb-0">
+                                ${thread.critical_unanswered.map(q => `
+                                    <li>${q.question} (${q.days_waiting} days)</li>
+                                `).join('')}
+                            </ul>
+                        </div>
+                    ` : ''}
+                    <a href="/thread/${thread.thread_id}" class="btn btn-sm btn-primary">View Timeline</a>
+                </div>
+            </div>
+        `).join('');
+    }
+    
+    new bootstrap.Modal(document.getElementById('todaysModal')).show();
+}
+
+loadPriorities();
+</script>
+{% endblock %}
